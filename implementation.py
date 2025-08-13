@@ -6,24 +6,25 @@ import torch
 from torchvision import datasets, transforms
 from torch.utils.data import DataLoader
 from torch import nn
-from torchmetrics import Accuracy
-from timeit import default_timer as Timer
-import matplotlib.pyplot as plt
-from torchmetrics import ConfusionMatrix
-from mlxtend.plotting import plot_confusion_matrix
 
 # Dataset and Dataloader Setup
 def get_dataloaders(batch_size=32):
+    # Use consistent transforms for train and test
+    transform = transforms.Compose([
+        transforms.ToTensor(),
+        transforms.Normalize((0.5,), (0.5,))  # Normalize to [-1, 1] range
+    ])
+    
     trainset = datasets.FashionMNIST(
         root='data',
         train=True,
-        transform=transforms.ToTensor(),
+        transform=transform,
         download=True
     )
     testset = datasets.FashionMNIST(
         root='data',
         train=False,
-        transform=transforms.ToTensor(),
+        transform=transform,
         download=True
     )
     train_dataloader = DataLoader(
@@ -34,11 +35,11 @@ def get_dataloaders(batch_size=32):
     test_dataloader = DataLoader(
         dataset=testset,
         batch_size=batch_size,
-        shuffle=True
+        shuffle=False  # Don't shuffle test data
     )
     return trainset, testset, train_dataloader, test_dataloader
 
-# Model Definition
+# Fixed Model Definition
 class ImageClassifier(nn.Module):
     def __init__(self, input_shape, hidden_shape, output_shape):
         super().__init__()
@@ -59,14 +60,14 @@ class ImageClassifier(nn.Module):
                 padding=1
             ),
             nn.ReLU(),
-            nn.MaxPool2d(kernel_size=2, stride=2)
+            nn.MaxPool2d(kernel_size=2, stride=2)  # 28x28 -> 14x14
         )
         self.block_2 = nn.Sequential(
             nn.Conv2d(hidden_shape, hidden_shape, 3, padding=1),
             nn.ReLU(),
             nn.Conv2d(hidden_shape, hidden_shape, 3, padding=1),
             nn.ReLU(),
-            nn.MaxPool2d(2)
+            nn.MaxPool2d(2)  # 14x14 -> 7x7
         )
         self.classifier = nn.Sequential(
             nn.Flatten(),
@@ -74,125 +75,146 @@ class ImageClassifier(nn.Module):
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        ans = self.block_1(x)
-        ans = self.block_2(ans)
-        ans = self.classifier(ans)
-        return ans
+        x = self.block_1(x)
+        x = self.block_2(x)
+        x = self.classifier(x)
+        return x
 
-# Training function
-def train_model(model, train_dataloader, loss_fn, optimizer, epochs, num_classes):
-    import tqdm
-    accuracy = Accuracy(task='multiclass', num_classes=num_classes)
-    model.train()
-    for epoch in tqdm.tqdm(range(epochs), desc='Training'):
-        total_loss = 0.0
-        accuracy.reset()
-        for batch, (x, y) in enumerate(train_dataloader):
+# Fixed Training function
+def train_model(model, train_dataloader, test_dataloader, loss_fn, optimizer, epochs, log_every=None, print_on_improve=False):
+    best_val_acc = 0.0
+
+    for epoch in range(epochs):
+        # Training phase
+        model.train()
+        total_train_loss = 0.0
+        train_correct = 0
+        train_total = 0
+
+        for _batch, (x, y) in enumerate(train_dataloader):
             y_pred = model(x)
             loss = loss_fn(y_pred, y)
-            y_pred_class = torch.softmax(y_pred, dim=1).argmax(dim=1)
-            acc = accuracy(y_pred_class, y)
-            total_loss += loss.item()
+
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
-        average_loss = total_loss / len(train_dataloader)
-        accu = accuracy.compute()
-        tqdm.tqdm.write(f"Epoch: {epoch} | Average Loss: {average_loss:.4f} | Accuracy: {accu:.4f}")
 
-# Evaluation function
-def eval_mode(model, test_dataloader, loss_fn, num_class=9):
+            total_train_loss += loss.item()
+            y_pred_class = torch.softmax(y_pred, dim=1).argmax(dim=1)
+            train_correct += (y_pred_class == y).sum().item()
+            train_total += y.size(0)
+
+        # Validation phase
+        model.eval()
+        total_val_loss = 0.0
+        val_correct = 0
+        val_total = 0
+
+        with torch.inference_mode():
+            for x, y in test_dataloader:
+                y_pred = model(x)
+                loss = loss_fn(y_pred, y)
+                total_val_loss += loss.item()
+
+                y_pred_class = torch.softmax(y_pred, dim=1).argmax(dim=1)
+                val_correct += (y_pred_class == y).sum().item()
+                val_total += y.size(0)
+
+        # Calculate metrics
+        avg_train_loss = total_train_loss / len(train_dataloader)
+        avg_val_loss = total_val_loss / len(test_dataloader)
+        train_acc = (train_correct / train_total) if train_total else 0.0
+        val_acc = (val_correct / val_total) if val_total else 0.0
+
+        # Save best model and optionally print on improvement
+        improved = val_acc > best_val_acc
+        if improved:
+            best_val_acc = val_acc
+            torch.save(model.state_dict(), 'model/best_model_weights.pth')
+            if print_on_improve:
+                print(
+                    f"Epoch {epoch}: Train Loss: {avg_train_loss:.4f}, Train Acc: {train_acc:.4f}, "
+                    f"Val Loss: {avg_val_loss:.4f}, Val Acc: {val_acc:.4f} (improved)"
+                )
+
+        # Optionally print at interval
+        if log_every is not None and log_every > 0 and ((epoch + 1) % log_every == 0):
+            print(
+                f"Epoch {epoch}: Train Loss: {avg_train_loss:.4f}, Train Acc: {train_acc:.4f}, "
+                f"Val Loss: {avg_val_loss:.4f}, Val Acc: {val_acc:.4f}"
+            )
+
+    print(f"Best validation accuracy: {best_val_acc:.4f}")
+
+# Fixed Evaluation function
+def eval_mode(model, test_dataloader, loss_fn):
     model.eval()
     total_loss = 0.0
-    test_accuracy = Accuracy(task='multiclass', num_classes=num_class)
-    start_time = Timer()
-    all_pred = []
-    all_target = []
+    correct = 0
+    total = 0
+
     with torch.inference_mode():
-        for batch, (x, y) in enumerate(test_dataloader):
+        for _batch, (x, y) in enumerate(test_dataloader):
             y_pred = model(x)
             loss = loss_fn(y_pred, y)
             total_loss += loss.item()
+
             pred = torch.softmax(y_pred, dim=1).argmax(dim=1)
-            acc = test_accuracy(pred, y)
-            all_pred.append(pred)
-            all_target.append(y)
-            if batch % 100 == 0:
-                print(f"Batch: {batch} | Loss: {loss.item():.4f} | Acc: {acc:.4f}")
-    final_accuracy = test_accuracy.compute()
+            correct += (pred == y).sum().item()
+            total += y.size(0)
+
+    final_accuracy = (correct / total) if total else 0.0
     average_loss = total_loss / len(test_dataloader)
-    eval_time = Timer() - start_time
-    y_pred_tensor = torch.cat(all_pred, dim=0)
-    y_pred_target = torch.cat(all_target, dim=0)
+ 
     print(f"Final Accuracy: {final_accuracy:.4f}")
     print(f"Average Loss: {average_loss:.4f}")
-    print(f"Evaluation Time: {eval_time:.2f}s")
+
     return {
         "accuracy": final_accuracy,
         "average_loss": average_loss,
-        "eval_time": eval_time,
-        "y_pred_tensor": y_pred_tensor,
-        "y_target": y_pred_target
     }
 
-# Optional: visualize some training images (call this explicitly if needed)
-def visualize_samples(trainset, classes):
-    import matplotlib.pyplot as plt
-    torch.manual_seed(42)
-    fig = plt.figure(figsize=(9, 9))
-    row, col = 4, 4
-    for i in range(1, row * col + 1):
-        index = torch.randint(0, len(trainset), size=[1]).item()
-        image, label = trainset[index]
-        fig.add_subplot(row, col, i)
-        plt.imshow(image.squeeze(), cmap='gray')
-        plt.title(classes[label])
-        plt.axis('off')
-    plt.show()
+ 
 
-# Function to plot confusion matrix given eval results
-def plot_confusion(eval_results, classes):
-    confmat = ConfusionMatrix(num_classes=len(classes), task='multiclass')
-    confmat_tensor = confmat(preds=eval_results["y_pred_tensor"], target=eval_results["y_target"])
-    fig, ax = plot_confusion_matrix(
-        conf_mat=confmat_tensor.numpy(),
-        class_names=classes,
-        figsize=(10, 7)
-    )
-    plt.show()
-
-# Main function to execute training, evaluation, and saving
 def main():
     # Setup
-    trainset, testset, train_dataloader, test_dataloader = get_dataloaders(batch_size=32)
+    trainset, testset, train_dataloader, test_dataloader = get_dataloaders(batch_size=64)
     classes = trainset.classes
     num_classes = len(classes)
-
-    # Optional: visualize some samples if needed
-    # visualize_samples(trainset, classes)
+    
+    # Minimal metadata output
+    print(f"Classes: {classes} | Train: {len(trainset)} | Test: {len(testset)}")
 
     # Model, loss and optimizer
     torch.manual_seed(42)
-    model = ImageClassifier(input_shape=1, hidden_shape=10, output_shape=num_classes)
+    model = ImageClassifier(input_shape=1, hidden_shape=32, output_shape=num_classes)  # Larger hidden size
+    
     loss_fn = nn.CrossEntropyLoss()
-    optimizer = torch.optim.SGD(model.parameters(), lr=0.005)
+    optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+
+    # Create model directory
+    os.makedirs('model', exist_ok=True)
 
     # Train
-    train_model(model, train_dataloader, loss_fn, optimizer, epochs=10, num_classes=num_classes)
+    train_model(
+        model,
+        train_dataloader,
+        test_dataloader,
+        loss_fn,
+        optimizer,
+        epochs=20,
+        log_every=None,
+        print_on_improve=True,
+    )
 
+    # Load best model for evaluation
+    model.load_state_dict(torch.load('model/best_model_weights.pth'))
+    
     # Evaluate
-    evaluated = eval_mode(model=model, test_dataloader=test_dataloader, loss_fn=loss_fn, num_class=num_classes)
+    evaluated = eval_mode(model=model, test_dataloader=test_dataloader, loss_fn=loss_fn)
 
-    # Plot confusion matrix
-    plot_confusion(evaluated, classes)
+    # Confusion matrix plotting removed for a leaner dependency footprint
+    print(f"Accuracy: {evaluated['accuracy']:.4f} ({evaluated['accuracy']*100:.2f}%) | Loss: {evaluated['average_loss']:.4f}")
 
-    # Save model weights
-    model_path = "model"
-    os.makedirs(model_path, exist_ok=True)
-    model_name = os.path.join(model_path, 'model_weights.pth')
-    torch.save(model.state_dict(), model_name)
-    print(f"Model weights saved to {model_name}")
-
-# This guard ensures no code runs on import, only if run directly
 if __name__ == "__main__":
     main()

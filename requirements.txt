@@ -1,9 +1,7 @@
 torch
 torchvision
-torchmetrics
-matplotlib
-mlxtend
 pillow
 streamlit
+numpy
 
 
