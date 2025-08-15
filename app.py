@@ -73,9 +73,9 @@ def open_image_safely(file):
         return None
 
 @st.cache_resource
-def load_models():
+def load_models(mode: str):
     """Load models based on selected mode."""
-    if MODEL_MODE.startswith("Fashion MNIST"):
+    if mode.startswith("Fashion MNIST"):
         model = ImageClassifier(input_shape=1, hidden_shape=32, output_shape=len(FASHION_CLASSES))
         try:
             # Load weights relative to this file to be robust to different CWDs in deployment
@@ -99,8 +99,8 @@ def load_models():
             st.error("ImageNet model couldn't be loaded.")
             return None
 
-# Load models
-model_info = load_models()
+# Load models (cache keyed by selected mode)
+model_info = load_models(MODEL_MODE)
 
 if model_info is not None:
     uploaded_file = st.file_uploader(
