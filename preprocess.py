@@ -76,6 +76,11 @@ def preprocess_fashion_image(image: Image.Image, auto_invert: bool = True) -> Tu
     except Exception:
         return None, None, False
 
+@st.cache_resource
+def preprocess_imagent_weights(weights):
+    if weights is None:
+        return None
+    return weights.transforms()
 
 def preprocess_imagenet_image(image: Image.Image, weights):
     """Preprocess an image for ImageNet inference using the given weights.
@@ -89,7 +94,7 @@ def preprocess_imagenet_image(image: Image.Image, weights):
         if image.mode != "RGB":
             image = image.convert("RGB")
 
-        transform = weights.transforms()
+        transform = preprocess_imagent_weights(weights)
         img_tensor = transform(image)
 
         # Create preview for display
