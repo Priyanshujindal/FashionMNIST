@@ -6,6 +6,12 @@ import torch
 from torchvision import datasets, transforms
 from torch.utils.data import DataLoader
 from torch import nn
+from pathlib import Path
+
+# Paths relative to this file
+BASE_DIR = Path(__file__).parent
+MODEL_DIR = BASE_DIR / 'model'
+WEIGHTS_PATH = MODEL_DIR / 'best_model_weights.pth'
 
 # Dataset and Dataloader Setup
 def get_dataloaders(batch_size=32):
@@ -114,7 +120,8 @@ def train_model(model, train_dataloader, test_dataloader, loss_fn, optimizer, ep
         # Save best model
         if val_acc > best_val_acc:
             best_val_acc = val_acc
-            torch.save(model.state_dict(), 'model/best_model_weights.pth')
+            MODEL_DIR.mkdir(parents=True, exist_ok=True)
+            torch.save(model.state_dict(), str(WEIGHTS_PATH))
 
 # Fixed Evaluation function
 def eval_mode(model, test_dataloader, loss_fn):
@@ -137,7 +144,6 @@ def eval_mode(model, test_dataloader, loss_fn):
     average_loss = total_loss / len(test_dataloader)
     return {"accuracy": final_accuracy, "average_loss": average_loss}
 
- 
 
 def main():
     # Setup
@@ -151,14 +157,14 @@ def main():
     loss_fn = nn.CrossEntropyLoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
 
-    # Create model directory
-    os.makedirs('model', exist_ok=True)
+    # Create model directory (script-relative)
+    MODEL_DIR.mkdir(parents=True, exist_ok=True)
 
     # Train
     train_model(model, train_dataloader, test_dataloader, loss_fn, optimizer, epochs=20)
 
     # Load best model for evaluation
-    model.load_state_dict(torch.load('model/best_model_weights.pth'))
+    model.load_state_dict(torch.load(str(WEIGHTS_PATH), map_location='cpu'))
     
     # Evaluate
     evaluated = eval_mode(model=model, test_dataloader=test_dataloader, loss_fn=loss_fn)

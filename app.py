@@ -5,6 +5,12 @@ ImageFile.LOAD_TRUNCATED_IMAGES = True
 from torchvision.models import resnet18, ResNet18_Weights
 from preprocess import preprocess_fashion_image, preprocess_imagenet_image
 import torch
+from pathlib import Path
+
+# Paths
+BASE_DIR = Path(__file__).parent
+MODEL_DIR = BASE_DIR / 'model'
+FASHION_WEIGHTS_PATH = MODEL_DIR / 'best_model_weights.pth'
 
 # --- UI ---
 st.title("Image Classifier")
@@ -72,11 +78,15 @@ def load_models():
     if MODEL_MODE.startswith("Fashion MNIST"):
         model = ImageClassifier(input_shape=1, hidden_shape=32, output_shape=len(FASHION_CLASSES))
         try:
-            model.load_state_dict(torch.load('model/best_model_weights.pth', map_location='cpu'))
+            # Load weights relative to this file to be robust to different CWDs in deployment
+            model.load_state_dict(torch.load(str(FASHION_WEIGHTS_PATH), map_location='cpu'))
             model.eval()
             return ("fashion", model, FASHION_CLASSES)
-        except Exception:
-            st.error("FashionMNIST model not found. Run `python implementation.py` to train it.")
+        except FileNotFoundError:
+            st.error("FashionMNIST model file is missing. Run `python implementation.py` to train it and ensure `model/best_model_weights.pth` is committed.")
+            return None
+        except Exception as e:
+            st.error(f"Failed to load FashionMNIST model: {e}")
             return None
     else:
         try:
