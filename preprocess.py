@@ -2,6 +2,7 @@ from typing import Tuple, Optional
 from PIL import Image, ImageOps
 import numpy as np
 from torchvision import transforms
+import streamlit as st
 
 
 def preprocess_fashion_image(image: Image.Image, auto_invert: bool = True) -> Tuple[Optional[object], Optional[np.ndarray], bool]:
